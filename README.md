@@ -35,19 +35,21 @@ Or double-click `run_app.bat`.
    - Branch: `main`
    - Main file path: `app.py`
 3. Open **Advanced settings**.
-4. In **Secrets**, add:
+4. Optional: In **Secrets**, add an internal access password:
 
 ```toml
-GEMINI_API_KEY = "your-company-or-team-gemini-api-key"
 APP_PASSWORD = "optional-internal-password"
 ```
 
-`APP_PASSWORD` is optional. If it is set, users must enter the password before using the app. If `GEMINI_API_KEY` is not set, the app will fall back to asking users to enter a Gemini API Key manually.
+`APP_PASSWORD` is optional. If it is set, users must enter the password before using the app.
+
+The current deployment is intended for personal API Key usage. Do not set `GEMINI_API_KEY` unless the company later prepares an official shared key. When `GEMINI_API_KEY` is not set, each user enters their own Gemini API Key in the sidebar, and usage is billed to that user's Google AI account.
 
 5. Deploy the app and share the generated Streamlit URL with your team.
 
 ## Notes
 
-- For team usage, set `GEMINI_API_KEY` in Streamlit Secrets so users do not need to enter their own API Key.
+- Current mode: each user enters their own Gemini API Key.
+- Future company mode: set `GEMINI_API_KEY` in Streamlit Secrets so users do not need to enter their own API Key.
 - Do not commit `.env`, `.streamlit/secrets.toml`, `.venv/`, `__pycache__/`, or `data/`.
 - Video analysis may consume significant tokens. Prefer shorter clips or marked segments for repeated testing.

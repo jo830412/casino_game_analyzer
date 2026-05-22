@@ -136,14 +136,14 @@ with st.sidebar:
         st.success("已使用 Streamlit Secrets 中的 Gemini API Key。")
         api_key_input = server_api_key
     else:
-        api_key_input = st.text_input("輸入 Gemini API Key", type="password")
+        api_key_input = st.text_input("輸入個人 Gemini API Key", type="password")
         st.markdown("[🔑 點此前往 Google AI Studio 取得 API Key](https://aistudio.google.com/app/apikey)")
-        st.warning("尚未設定 Streamlit Secrets。部署給多人使用時，建議由管理者在 Secrets 設定 `GEMINI_API_KEY`。")
+        st.info("目前使用個人 API Key 模式：每位使用者輸入自己的 Key，費用與額度會算在各自的 Google AI 帳號。")
 
     st.markdown("---")
     with st.expander("📋 使用步驟（點我展開）", expanded=True):
         st.markdown("""
-1. 🔑 管理者設定 Gemini API Key；若未設定，使用者可手動輸入
+1. 🔑 輸入自己的 Gemini API Key
 2. 🎮 選擇遊戲類型
 3. 📹 上傳自家與競品影片
 4. ⏱️ (選填) 指定分析區間
@@ -154,7 +154,7 @@ with st.sidebar:
 """)
 
     with st.expander("💡 計費與隱私須知", expanded=False):
-        st.error("⚠️ **非常重要 (需綁定付費資訊)**：\n分析影片會消耗大量 Token，**API Key 帳號都必須綁定付費資訊 (Pay as you go)** 才能成功執行。")
+        st.error("⚠️ **非常重要 (個人 API Key 模式)**：\n分析影片會消耗大量 Token，費用與額度會算在輸入的 API Key 所屬帳號。通常需要綁定付費資訊 (Pay as you go) 才能穩定執行。")
         st.markdown("分析完畢後，雲端影片檔案將會被自動刪除，保護機密並確保不會浪費資源。")
 
     st.markdown("---")
@@ -706,7 +706,7 @@ if st.session_state.get("is_analyzing", False):
         if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "Quota exceeded" in error_msg:
             st.error("🚨 **API 額度已耗盡 (Quota Exceeded)**")
             st.warning("⚠️ **原因**：您目前使用的 API Key 處於「免費 Tier (Free Tier)」，而免費方案上傳分析兩部影片極易超過長內容的 Token 限制，或是您的地區剛好未開放免費額度。")
-            st.info("👉 **建議處理**：改用較短片段、啟用分析區間，或請管理者確認 Google AI Studio / Cloud 專案的帳單與額度。")
+            st.info("👉 **建議處理**：改用較短片段、啟用分析區間，或請該 API Key 的持有人確認 Google AI Studio / Cloud 專案的帳單與額度。")
             with st.expander("詳細原始錯誤訊息"):
                 st.write(error_msg)
         elif "API_KEY_INVALID" in error_msg or "invalid api key" in error_msg.lower() or "permission" in error_msg.lower():
