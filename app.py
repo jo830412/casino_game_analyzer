@@ -78,6 +78,11 @@ def save_analysis_history(history):
         json.dump(safe_history, f, ensure_ascii=False, indent=2)
 
 
+def trigger_analysis():
+    st.session_state["is_analyzing"] = True
+    st.session_state["analysis_done"] = False
+
+
 # ================================
 # 1. 介面與基本設定
 # ================================
@@ -93,6 +98,9 @@ html, body, [class*="css"] {
     font-family: 'Noto Sans TC', 'Microsoft JhengHei', sans-serif !important;
 }
 h1 { letter-spacing: -0.02em; }
+.block-container { padding-top: 2rem; padding-bottom: 3rem; }
+[data-testid="stMetricValue"] { font-size: 1.35rem; }
+.section-hint { color: #9ca3af; font-size: 0.92rem; margin-top: -0.4rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -168,181 +176,197 @@ with st.sidebar:
         ],
         help="建議使用 gemini-2.5-flash（速度快、費用低）或 gemini-2.5-pro（分析更精準）。"
     )
-
-
-
 st.markdown("---")
-
-with st.container(border=True):
-    st.subheader("🧭 專案資訊與分析方向")
-    meta_col1, meta_col2 = st.columns(2)
-    project_name = meta_col1.text_input(
-        "專案 / 遊戲名稱",
-        placeholder="例如：埃及主題 Slot v2",
-        help="會寫入報告與歷史記錄，方便日後回看。"
-    )
-    analyst_name = meta_col2.text_input(
-        "分析人員 / 企劃",
-        placeholder="例如：產品企劃 Amy",
-        help="僅用於報告標記，不會上傳到其他地方保存。"
-    )
-    analysis_modes = st.multiselect(
-        "本次分析模式",
-        list(ANALYSIS_MODE_GUIDES.keys()),
-        default=["爽感與節奏", "UI/UX 操作", "美術特效"],
-        help="可複選，AI 會依照選擇的方向調整觀察重點與建議格式。"
-    )
 
 # ================================
 # 2. 檔案上傳與選項區
 # ================================
-col1, col2 = st.columns(2)
-with col1:
+workspace_col, summary_col = st.columns([2.25, 1], gap="large")
+
+with workspace_col:
+    st.subheader("1. 基本資料")
+    st.markdown('<p class="section-hint">先標記這次分析屬於哪個專案，後續報告與歷史紀錄會用這些資訊命名。</p>', unsafe_allow_html=True)
     with st.container(border=True):
-        st.subheader("🏠 自家遊戲")
-        home_video = st.file_uploader("上傳自家遊戲影片 (MP4 / MOV / AVI)", type=["mp4", "mov", "avi"], key="home_vid")
-        st.caption("📁 支援直接拖放 · 建議長度 30 秒～3 分鐘 · 請確認影片包含完整遊玩流程")
-        if home_video:
-            st.video(home_video)
+        meta_col1, meta_col2 = st.columns(2)
+        project_name = meta_col1.text_input(
+            "專案 / 遊戲名稱",
+            placeholder="例如：埃及主題 Slot v2",
+            help="會寫入報告與歷史記錄，方便日後回看。"
+        )
+        analyst_name = meta_col2.text_input(
+            "分析人員 / 企劃",
+            placeholder="例如：產品企劃 Amy",
+            help="僅用於報告標記，不會上傳到其他地方保存。"
+        )
+        game_type = st.selectbox(
+            "遊戲類型",
+            ["Slot 老虎機", "捕魚機", "撲克/棋牌", "其他"],
+            help="輔助 AI 聚焦對應的核心特效節奏。"
+        )
 
-with col2:
-    with st.container(border=True):
-        st.subheader("🔥 競品遊戲")
-        comp_video = st.file_uploader("上傳競品遊戲影片 (MP4 / MOV / AVI)", type=["mp4", "mov", "avi"], key="comp_vid")
-        st.caption("📁 支援直接拖放 · 建議長度 30 秒～3 分鐘 · 請確認影片包含完整遊玩流程")
-        if comp_video:
-            st.video(comp_video)
-
-st.markdown("---")
-game_type = st.selectbox(
-    "這是哪種類型的博弈遊戲？",
-    ["Slot 老虎機", "捕魚機", "撲克/棋牌", "其他"],
-    help="輔助 AI 聚焦對應的核心特效節奏。"
-)
-
-custom_focus = st.text_area(
-    "🎯 本次分析有什麼特別想關注的細節嗎？（選填）",
-    help="例如：特別注意 Free Game 的過場速度、中大獎的音效層次、按鈕擺放位置等。"
-)
-
-st.markdown("---")
-st.subheader("⏱️ 分析區間設定")
-enable_time_range = st.checkbox("啟用指定分析區間 (僅分析精彩片段以節省 Token)", value=False)
-time_range_prompt = ""
-if enable_time_range:
-    st.caption("先用滑桿選整體觀察範圍；若有重點事件，可在下方標記多個片段。")
-    video_range_max = st.number_input(
-        "影片可選範圍上限（秒）",
-        min_value=30,
-        max_value=900,
-        value=180,
-        step=30,
-        help="Streamlit 無法穩定讀取所有瀏覽器上傳影片的實際長度，因此這裡用秒數上限控制滑桿範圍。"
-    )
-    default_end = min(30, int(video_range_max))
-    home_range = st.slider(
-        "🏠 自家遊戲整體分析範圍",
-        min_value=0,
-        max_value=int(video_range_max),
-        value=(0, default_end),
-        step=1,
-        format="%d 秒",
-        key="home_time_range",
-    )
-    st.caption(f"自家遊戲：{format_seconds(home_range[0])} 到 {format_seconds(home_range[1])}")
-    comp_range = st.slider(
-        "🔥 競品遊戲整體分析範圍",
-        min_value=0,
-        max_value=int(video_range_max),
-        value=(0, default_end),
-        step=1,
-        format="%d 秒",
-        key="comp_time_range",
-    )
-    st.caption(f"競品遊戲：{format_seconds(comp_range[0])} 到 {format_seconds(comp_range[1])}")
-
-    st.markdown("#### 🎬 重點片段標記")
-    segment_count = st.number_input(
-        "要標記幾個重點片段？",
-        min_value=0,
-        max_value=5,
-        value=0,
-        step=1,
-        help="例如一般 Spin、中小獎、Big Win、Free Game、Bonus 轉場。"
-    )
-    segment_lines = []
-    for idx in range(int(segment_count)):
+    st.subheader("2. 上傳影片")
+    st.markdown('<p class="section-hint">請上傳自家與競品的實機遊玩影片。建議先用 30 秒到 3 分鐘片段做比較。</p>', unsafe_allow_html=True)
+    upload_col1, upload_col2 = st.columns(2)
+    with upload_col1:
         with st.container(border=True):
-            st.markdown(f"**片段 {idx + 1}**")
-            seg_col1, seg_col2 = st.columns([1, 2])
-            segment_type = seg_col1.selectbox(
-                "片段類型",
-                SEGMENT_TYPES,
-                key=f"segment_type_{idx}",
+            st.subheader("🏠 自家遊戲")
+            home_video = st.file_uploader("上傳自家遊戲影片 (MP4 / MOV / AVI)", type=["mp4", "mov", "avi"], key="home_vid")
+            st.caption("支援拖放 · 建議包含完整遊玩流程")
+            if home_video:
+                st.video(home_video)
+
+    with upload_col2:
+        with st.container(border=True):
+            st.subheader("🔥 競品遊戲")
+            comp_video = st.file_uploader("上傳競品遊戲影片 (MP4 / MOV / AVI)", type=["mp4", "mov", "avi"], key="comp_vid")
+            st.caption("支援拖放 · 建議與自家影片包含相近事件")
+            if comp_video:
+                st.video(comp_video)
+
+    st.subheader("3. 分析設定")
+    with st.expander("進階分析設定", expanded=False):
+        analysis_modes = st.multiselect(
+            "本次分析模式",
+            list(ANALYSIS_MODE_GUIDES.keys()),
+            default=["爽感與節奏", "UI/UX 操作", "美術特效"],
+            help="可複選，AI 會依照選擇的方向調整觀察重點與建議格式。"
+        )
+
+        custom_focus = st.text_area(
+            "🎯 本次分析有什麼特別想關注的細節嗎？（選填）",
+            help="例如：特別注意 Free Game 的過場速度、中大獎的音效層次、按鈕擺放位置等。"
+        )
+
+        st.markdown("#### ⏱️ 分析區間設定")
+        enable_time_range = st.checkbox("啟用指定分析區間 (僅分析精彩片段以節省 Token)", value=False)
+        time_range_prompt = ""
+        if enable_time_range:
+            st.caption("先用滑桿選整體觀察範圍；若有重點事件，可在下方標記多個片段。")
+            video_range_max = st.number_input(
+                "影片可選範圍上限（秒）",
+                min_value=30,
+                max_value=900,
+                value=180,
+                step=30,
+                help="Streamlit 無法穩定讀取所有瀏覽器上傳影片的實際長度，因此這裡用秒數上限控制滑桿範圍。"
             )
-            segment_note = seg_col2.text_input(
-                "備註（選填）",
-                placeholder="例如：第 2 次 Big Win、Free Game 進場",
-                key=f"segment_note_{idx}",
-            )
-            seg_home_range = st.slider(
-                "🏠 自家片段時間",
+            default_end = min(30, int(video_range_max))
+            home_range = st.slider(
+                "🏠 自家遊戲整體分析範圍",
                 min_value=0,
                 max_value=int(video_range_max),
                 value=(0, default_end),
                 step=1,
                 format="%d 秒",
-                key=f"segment_home_{idx}",
+                key="home_time_range",
             )
-            seg_comp_range = st.slider(
-                "🔥 競品片段時間",
+            st.caption(f"自家遊戲：{format_seconds(home_range[0])} 到 {format_seconds(home_range[1])}")
+            comp_range = st.slider(
+                "🔥 競品遊戲整體分析範圍",
                 min_value=0,
                 max_value=int(video_range_max),
                 value=(0, default_end),
                 step=1,
                 format="%d 秒",
-                key=f"segment_comp_{idx}",
+                key="comp_time_range",
             )
-            note_text = f"；備註：{segment_note.strip()}" if segment_note.strip() else ""
-            segment_lines.append(
-                f"- {segment_type}{note_text}：自家 {format_seconds(seg_home_range[0])}-{format_seconds(seg_home_range[1])}；"
-                f"競品 {format_seconds(seg_comp_range[0])}-{format_seconds(seg_comp_range[1])}"
+            st.caption(f"競品遊戲：{format_seconds(comp_range[0])} 到 {format_seconds(comp_range[1])}")
+
+            st.markdown("#### 🎬 重點片段標記")
+            segment_count = st.number_input(
+                "要標記幾個重點片段？",
+                min_value=0,
+                max_value=5,
+                value=0,
+                step=1,
+                help="例如一般 Spin、中小獎、Big Win、Free Game、Bonus 轉場。"
             )
+            segment_lines = []
+            for idx in range(int(segment_count)):
+                with st.container(border=True):
+                    st.markdown(f"**片段 {idx + 1}**")
+                    seg_col1, seg_col2 = st.columns([1, 2])
+                    segment_type = seg_col1.selectbox(
+                        "片段類型",
+                        SEGMENT_TYPES,
+                        key=f"segment_type_{idx}",
+                    )
+                    segment_note = seg_col2.text_input(
+                        "備註（選填）",
+                        placeholder="例如：第 2 次 Big Win、Free Game 進場",
+                        key=f"segment_note_{idx}",
+                    )
+                    seg_home_range = st.slider(
+                        "🏠 自家片段時間",
+                        min_value=0,
+                        max_value=int(video_range_max),
+                        value=(0, default_end),
+                        step=1,
+                        format="%d 秒",
+                        key=f"segment_home_{idx}",
+                    )
+                    seg_comp_range = st.slider(
+                        "🔥 競品片段時間",
+                        min_value=0,
+                        max_value=int(video_range_max),
+                        value=(0, default_end),
+                        step=1,
+                        format="%d 秒",
+                        key=f"segment_comp_{idx}",
+                    )
+                    note_text = f"；備註：{segment_note.strip()}" if segment_note.strip() else ""
+                    segment_lines.append(
+                        f"- {segment_type}{note_text}：自家 {format_seconds(seg_home_range[0])}-{format_seconds(seg_home_range[1])}；"
+                        f"競品 {format_seconds(seg_comp_range[0])}-{format_seconds(seg_comp_range[1])}"
+                    )
 
-    segment_prompt = "\n".join(segment_lines) if segment_lines else "- 未標記特定事件片段，請依整體分析範圍觀察。"
-    time_range_prompt = (
-        f"\n\n⏱️ **重要指令（時間區段分析）**：\n"
-        f"- 對於【自家遊戲】，請優先針對影片中 **{format_seconds(home_range[0])} 到 {format_seconds(home_range[1])}** 的畫面進行分析。\n"
-        f"- 對於【競品遊戲】，請優先針對影片中 **{format_seconds(comp_range[0])} 到 {format_seconds(comp_range[1])}** 的畫面進行分析。\n"
-        f"- 若下方有重點片段標記，請在報告中引用這些片段作為佐證，並比較同類事件的節奏、特效、音效、UI 提示與玩家爽感。\n"
-        f"\n重點片段標記：\n{segment_prompt}"
-    )
-
-st.markdown("---")
-with st.container(border=True):
-    st.subheader("🧾 分析前檢查")
-    if home_video and comp_video:
-        home_size_mb = home_video.size / (1024 * 1024)
-        comp_size_mb = comp_video.size / (1024 * 1024)
-        total_size_mb = home_size_mb + comp_size_mb
-        estimated_seconds = estimate_analysis_seconds(total_size_mb)
-
-        check_cols = st.columns(4)
-        check_cols[0].metric("🏠 自家影片", format_file_size(home_video.size))
-        check_cols[1].metric("🔥 競品影片", format_file_size(comp_video.size))
-        check_cols[2].metric("合計大小", f"{total_size_mb:.1f} MB")
-        check_cols[3].metric("預估等待", f"{estimated_seconds // 60}分{estimated_seconds % 60}秒")
-
-        if total_size_mb >= HIGH_RISK_TOTAL_MB:
-            st.error("兩支影片合計偏大，容易遇到上傳逾時、模型處理時間過長或費用明顯增加。建議先裁切片段再分析。")
-        elif total_size_mb >= RECOMMENDED_TOTAL_MB:
-            st.warning("影片合計大小已偏高。若只想比較重點事件，建議啟用上方的分析區間與片段標記。")
-        elif not enable_time_range:
-            st.info("目前會讓 AI 觀看整段影片。若只想比較 Big Win、Free Game 或 Bonus 轉場，可啟用分析區間來節省時間與費用。")
+            segment_prompt = "\n".join(segment_lines) if segment_lines else "- 未標記特定事件片段，請依整體分析範圍觀察。"
+            time_range_prompt = (
+                f"\n\n⏱️ **重要指令（時間區段分析）**：\n"
+                f"- 對於【自家遊戲】，請優先針對影片中 **{format_seconds(home_range[0])} 到 {format_seconds(home_range[1])}** 的畫面進行分析。\n"
+                f"- 對於【競品遊戲】，請優先針對影片中 **{format_seconds(comp_range[0])} 到 {format_seconds(comp_range[1])}** 的畫面進行分析。\n"
+                f"- 若下方有重點片段標記，請在報告中引用這些片段作為佐證，並比較同類事件的節奏、特效、音效、UI 提示與玩家爽感。\n"
+                f"\n重點片段標記：\n{segment_prompt}"
+            )
         else:
-            st.success("檔案大小與分析區間設定看起來適合執行。")
-    else:
-        st.info("上傳自家與競品影片後，這裡會顯示檔案大小、預估等待時間與分析風險提示。")
+            time_range_prompt = ""
+
+with summary_col:
+    st.subheader("本次分析")
+    with st.container(border=True):
+        selected_modes_preview = analysis_modes if "analysis_modes" in locals() else ["爽感與節奏", "UI/UX 操作", "美術特效"]
+        st.caption("分析摘要")
+        st.write(f"**專案**：{project_name.strip() or '未命名'}")
+        st.write(f"**遊戲類型**：{game_type}")
+        st.write(f"**分析模式**：{', '.join(selected_modes_preview)}")
+
+        if home_video and comp_video:
+            home_size_mb = home_video.size / (1024 * 1024)
+            comp_size_mb = comp_video.size / (1024 * 1024)
+            total_size_mb = home_size_mb + comp_size_mb
+            estimated_seconds = estimate_analysis_seconds(total_size_mb)
+            metric_col1, metric_col2 = st.columns(2)
+            metric_col1.metric("合計大小", f"{total_size_mb:.1f} MB")
+            metric_col2.metric("預估等待", f"{estimated_seconds // 60}分{estimated_seconds % 60}秒")
+
+            if total_size_mb >= HIGH_RISK_TOTAL_MB:
+                st.error("影片偏大，建議裁切或啟用片段分析。")
+            elif total_size_mb >= RECOMMENDED_TOTAL_MB:
+                st.warning("影片合計偏高，建議使用片段分析。")
+            elif not enable_time_range:
+                st.info("目前會讓 AI 觀看整段影片。")
+            else:
+                st.success("設定看起來適合執行。")
+        else:
+            st.info("請先上傳自家與競品影片。")
+
+        st.button(
+            "🚀 開始深度分析",
+            on_click=trigger_analysis,
+            disabled=st.session_state.get("is_analyzing", False),
+            use_container_width=True,
+            type="primary",
+        )
 
 # ================================
 # 3. 核心處理函式
@@ -455,12 +479,6 @@ def upload_video_to_gemini(client: genai.Client, uploaded_file, file_label: str 
 # ================================
 # 4. 執行按鈕與報告渲染區
 # ================================
-def trigger_analysis():
-    st.session_state["is_analyzing"] = True
-    st.session_state["analysis_done"] = False
-
-st.button("🚀 開始深度分析", on_click=trigger_analysis, disabled=st.session_state.get("is_analyzing", False), use_container_width=True, type="primary")
-
 if st.session_state.get("is_analyzing", False):
     if not api_key_input:
         st.error("請先於左側欄位輸入 Gemini API Key。")
@@ -748,35 +766,29 @@ if st.session_state.get("is_analyzing", False):
 if st.session_state.get("analysis_history"):
     st.markdown("---")
     history = st.session_state["analysis_history"]
+    if "selected_history_idx" not in st.session_state:
+        st.session_state["selected_history_idx"] = len(history) - 1
+    st.session_state["selected_history_idx"] = min(st.session_state["selected_history_idx"], len(history) - 1)
+    current_report = history[st.session_state["selected_history_idx"]]
 
-    # 歷史記錄選擇器（多於 1 筆才顯示）
-    if len(history) > 1:
-        history_labels = [
-            f"第 {i+1} 次｜{h.get('project_name', '未命名專案')}｜{h.get('game_type', '未分類')}｜{h.get('time', '')}"
-            for i, h in enumerate(history)
-        ]
-        selected_idx = st.selectbox(
-            f"📂 歷史報告記錄（共 {len(history)} 筆，可切換查看）",
-            range(len(history_labels)),
-            index=len(history_labels) - 1,
-            format_func=lambda i: history_labels[i],
-        )
-        current_report = history[selected_idx]
-    else:
-        current_report = history[-1]
-
-    st.markdown("### 📊 競品體驗分析報告")
+    st.markdown("## 📊 競品體驗分析報告")
     meta_cols = st.columns(4)
     meta_cols[0].caption(f"專案：{current_report.get('project_name', '未命名專案')}")
     meta_cols[1].caption(f"分析人員：{current_report.get('analyst_name', '未填寫')}")
     meta_cols[2].caption(f"模式：{', '.join(current_report.get('analysis_modes', [])) or '未記錄'}")
     meta_cols[3].caption(f"模型：{current_report.get('model', '未記錄')}")
 
-    tab1, tab2 = st.tabs(["📄 AI 結構化報告", "💾 下載與匯出"])
+    fig, clean_report, scores = render_radar_chart(current_report["report_md"])
+    safe_project = re.sub(r'[\\/:*?"<>|\s]+', '_', current_report.get('project_name', '競品分析')).strip('_')
+    safe_time = current_report.get('time', '').replace('/', '-').replace(' ', '_').replace(':', '')
+    report_html = current_report.get("styled_html", "")
+    task_cards_text = extract_task_cards(current_report.get("report_md", ""))
 
-    with tab1:
-        fig, clean_report, scores = render_radar_chart(current_report["report_md"])
+    overview_tab, tasks_tab, report_tab, export_tab, history_tab = st.tabs(
+        ["總覽", "任務卡", "完整報告", "下載", "歷史"]
+    )
 
+    with overview_tab:
         if scores:
             home_avg = sum(scores["home"]) / len(scores["home"])
             comp_avg = sum(scores["comp"]) / len(scores["comp"])
@@ -813,19 +825,24 @@ if st.session_state.get("analysis_history"):
                     else:
                         st.write(f"- **{item['維度']}**：雙方同分，都是 {item['自家']:.0f} 分。")
             st.markdown("---")
+        else:
+            st.info("此報告沒有可解析的 JSON 評分，因此暫時無法顯示雷達圖與分數摘要。")
 
         if fig:
             st.plotly_chart(fig, use_container_width=True)
 
-        with st.container(border=True):
+        with st.expander("查看完整 AI 報告內容", expanded=False):
             st.markdown(clean_report)
 
-    with tab2:
+    with tasks_tab:
+        st.markdown("### 📝 可直接建立的任務卡")
+        st.markdown(task_cards_text)
+
+    with report_tab:
+        st.markdown(clean_report)
+
+    with export_tab:
         st.markdown("您可以下載完整報告、Word 相容檔、Markdown 備份，或只下載任務卡給 Jira / Trello / Notion 使用。")
-        safe_project = re.sub(r'[\\/:*?"<>|\s]+', '_', current_report.get('project_name', '競品分析')).strip('_')
-        safe_time = current_report.get('time', '').replace('/', '-').replace(' ', '_').replace(':', '')
-        report_html = current_report.get("styled_html", "")
-        task_cards_text = extract_task_cards(current_report.get("report_md", ""))
         col1, col2 = st.columns(2)
         with col1:
             st.download_button(
@@ -862,8 +879,24 @@ if st.session_state.get("analysis_history"):
                 use_container_width=True
             )
 
-        st.markdown("---")
+    with history_tab:
         st.markdown("### 🗂️ 歷史資料管理")
+        if len(history) > 1:
+            history_labels = [
+                f"第 {i+1} 次｜{h.get('project_name', '未命名專案')}｜{h.get('game_type', '未分類')}｜{h.get('time', '')}"
+                for i, h in enumerate(history)
+            ]
+            st.selectbox(
+                f"歷史報告記錄（共 {len(history)} 筆，可切換查看）",
+                range(len(history_labels)),
+                index=st.session_state["selected_history_idx"],
+                format_func=lambda i: history_labels[i],
+                key="selected_history_idx",
+            )
+            st.info("切換歷史報告後，上方總覽、任務卡、完整報告與下載分頁會同步顯示選取的報告。")
+        else:
+            st.info("目前只有 1 筆歷史報告。")
+
         history_json = json.dumps(st.session_state["analysis_history"], ensure_ascii=False, indent=2)
         hcol1, hcol2 = st.columns(2)
         with hcol1:
