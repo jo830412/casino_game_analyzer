@@ -27,8 +27,27 @@ python -m venv .venv
 
 Or double-click `run_app.bat`.
 
+## Deploy on Streamlit Community Cloud
+
+1. Open Streamlit Community Cloud: <https://share.streamlit.io/>
+2. Create a new app from this GitHub repository:
+   - Repository: `jo830412/casino_game_analyzer`
+   - Branch: `main`
+   - Main file path: `app.py`
+3. Open **Advanced settings**.
+4. In **Secrets**, add:
+
+```toml
+GEMINI_API_KEY = "your-company-or-team-gemini-api-key"
+APP_PASSWORD = "optional-internal-password"
+```
+
+`APP_PASSWORD` is optional. If it is set, users must enter the password before using the app. If `GEMINI_API_KEY` is not set, the app will fall back to asking users to enter a Gemini API Key manually.
+
+5. Deploy the app and share the generated Streamlit URL with your team.
+
 ## Notes
 
-- The current version asks the user to enter a Gemini API Key in the sidebar.
+- For team usage, set `GEMINI_API_KEY` in Streamlit Secrets so users do not need to enter their own API Key.
 - Do not commit `.env`, `.streamlit/secrets.toml`, `.venv/`, `__pycache__/`, or `data/`.
 - Video analysis may consume significant tokens. Prefer shorter clips or marked segments for repeated testing.

@@ -53,6 +53,13 @@ def extract_task_cards(report_text):
     return match.group(1).strip()
 
 
+def get_secret_value(key, default=""):
+    try:
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
+
+
 def load_analysis_history():
     if not HISTORY_FILE.exists():
         return []
@@ -100,21 +107,43 @@ if "styled_html" not in st.session_state:
     st.session_state["styled_html"] = ""
 if "analysis_history" not in st.session_state:
     st.session_state["analysis_history"] = load_analysis_history()
+if "access_granted" not in st.session_state:
+    st.session_state["access_granted"] = False
+
+server_api_key = get_secret_value("GEMINI_API_KEY")
+app_password = get_secret_value("APP_PASSWORD")
 
 st.title("🎰 Casino Game AI 競品分析儀")
 st.caption("🏷️ 版本：v1.3.0 (全面體驗升級)")
 st.markdown("快速比較自家產品與市面競品的遊玩體驗差異，並產生具有體感的結構化改善報告。")
 
+if app_password and not st.session_state["access_granted"]:
+    with st.container(border=True):
+        st.subheader("🔐 內部工具登入")
+        entered_password = st.text_input("請輸入使用密碼", type="password")
+        if st.button("進入工具", type="primary"):
+            if entered_password == app_password:
+                st.session_state["access_granted"] = True
+                st.rerun()
+            else:
+                st.error("密碼不正確，請確認後再試。")
+    st.stop()
+
 # 側邊欄：設定
 with st.sidebar:
     st.header("⚙️ 設定與權限")
-    api_key_input = st.text_input("輸入 Gemini API Key", type="password")
-    st.markdown("[🔑 點此前往 Google AI Studio 取得 API Key](https://aistudio.google.com/app/apikey)")
+    if server_api_key:
+        st.success("已使用 Streamlit Secrets 中的 Gemini API Key。")
+        api_key_input = server_api_key
+    else:
+        api_key_input = st.text_input("輸入 Gemini API Key", type="password")
+        st.markdown("[🔑 點此前往 Google AI Studio 取得 API Key](https://aistudio.google.com/app/apikey)")
+        st.warning("尚未設定 Streamlit Secrets。部署給多人使用時，建議由管理者在 Secrets 設定 `GEMINI_API_KEY`。")
 
     st.markdown("---")
     with st.expander("📋 使用步驟（點我展開）", expanded=True):
         st.markdown("""
-1. 🔑 輸入您的 Gemini API Key
+1. 🔑 管理者設定 Gemini API Key；若未設定，使用者可手動輸入
 2. 🎮 選擇遊戲類型
 3. 📹 上傳自家與競品影片
 4. ⏱️ (選填) 指定分析區間
