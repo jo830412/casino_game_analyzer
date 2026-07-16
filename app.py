@@ -83,6 +83,106 @@ def trigger_analysis():
     st.session_state["analysis_done"] = False
 
 
+# 深淺色主題：Streamlit 尚無官方執行時切換 API。
+# 作法：1) st._config.set_option 寫入主題設定，讓「下一次頁面載入」原生套用；
+#      2) 因為新版 Streamlit 前端不會在 rerun 時即時吃新主題，切換當下另外注入
+#         覆蓋 CSS（見 build_theme_override_css），讓主要畫面立即變色；
+#         使用者重新整理頁面後會回到 100% 原生主題渲染。
+# 注意：set_option 為整個伺服器行程共用，多人同用一個部署時會互相影響預設主題。
+THEME_PRESETS = {
+    "dark": {
+        "theme.base": "dark",
+        "theme.primaryColor": "#FFC107",
+        "theme.backgroundColor": "#0E1117",
+        "theme.secondaryBackgroundColor": "#262730",
+        "theme.textColor": "#FAFAFA",
+    },
+    "light": {
+        "theme.base": "light",
+        "theme.primaryColor": "#D97706",
+        "theme.backgroundColor": "#FFFFFF",
+        "theme.secondaryBackgroundColor": "#F0F2F6",
+        "theme.textColor": "#31333F",
+    },
+}
+
+
+def detect_theme_base():
+    # 以伺服器目前的 theme.base 設定為準（與切換按鈕寫入的是同一個來源），
+    # 避免第一次載入時 st.context.theme 回報值與實際畫面不一致。
+    try:
+        base = st._config.get_option("theme.base")
+        if base in ("dark", "light"):
+            return base
+    except Exception:
+        pass
+    return "dark"
+
+
+def apply_theme(theme_name):
+    for option, value in THEME_PRESETS[theme_name].items():
+        st._config.set_option(option, value)
+
+
+def toggle_theme():
+    new_theme = "light" if st.session_state.get("ui_theme") == "dark" else "dark"
+    st.session_state["ui_theme"] = new_theme
+    st.session_state["theme_live_override"] = True
+    apply_theme(new_theme)
+
+
+def build_theme_override_css(theme_name):
+    """同一個 session 內切換主題時的即時覆蓋樣式（重新整理後由原生主題接手）。"""
+    preset = THEME_PRESETS[theme_name]
+    bg = preset["theme.backgroundColor"]
+    bg2 = preset["theme.secondaryBackgroundColor"]
+    text = preset["theme.textColor"]
+    border = "#3D4044" if theme_name == "dark" else "#D6D6D9"
+    return f"""
+<style>
+[data-testid="stApp"], [data-testid="stAppViewContainer"], [data-testid="stHeader"] {{
+    background-color: {bg} !important;
+}}
+[data-testid="stSidebar"], [data-testid="stSidebarContent"] {{
+    background-color: {bg2} !important;
+}}
+[data-testid="stApp"] :is(h1, h2, h3, h4, h5, h6) {{ color: {text} !important; }}
+[data-testid="stApp"] [data-testid="stMarkdownContainer"]
+  :is(p, li, td, th, strong, em, span):not([data-testid="stAlert"] *, button *, a, a *) {{
+    color: {text} !important;
+}}
+[data-testid="stApp"] [data-testid="stCaptionContainer"] :is(p, span):not([data-testid="stAlert"] *) {{
+    color: {text} !important;
+}}
+[data-testid="stMetricValue"], [data-testid="stMetricLabel"] {{ color: {text} !important; }}
+[data-baseweb="tab"] {{ color: {text} !important; }}
+button[data-testid="stBaseButton-secondary"] {{
+    background-color: {bg2} !important; color: {text} !important; border-color: {border} !important;
+}}
+button[data-testid="stBaseButton-secondary"] p {{ color: {text} !important; }}
+[data-testid="stFileUploaderDropzone"] {{ background-color: {bg2} !important; }}
+[data-testid="stFileUploaderDropzone"] :is(span, small, div) {{ color: {text} !important; }}
+[data-baseweb="input"], [data-baseweb="base-input"], [data-baseweb="textarea"], [data-baseweb="select"] > div {{
+    background-color: {bg2} !important;
+}}
+[data-baseweb="input"] input, [data-baseweb="textarea"] textarea,
+[data-baseweb="select"] input, [data-baseweb="select"] > div div {{
+    color: {text} !important;
+}}
+[data-baseweb="popover"] [data-baseweb="menu"], [data-baseweb="popover"] ul {{
+    background-color: {bg2} !important;
+}}
+[data-baseweb="popover"] li, [data-baseweb="popover"] li div {{ color: {text} !important; }}
+[data-testid="stExpander"] summary {{ color: {text} !important; }}
+[data-testid="stExpander"] details {{ border-color: {border} !important; }}
+[data-testid="stVerticalBlockBorderWrapper"] {{ border-color: {border} !important; }}
+[data-testid="stThumbValue"], [data-testid="stTickBarMin"], [data-testid="stTickBarMax"] {{
+    color: {text} !important;
+}}
+</style>
+"""
+
+
 # ================================
 # 1. 介面與基本設定
 # ================================
@@ -90,19 +190,29 @@ st.set_page_config(page_title="Casino Game AI 競品分析儀", page_icon="🎰"
 
 import streamlit.components.v1 as components
 
+# 初始化主題狀態（第一次載入時跟隨目前實際主題，之後由切換按鈕控制）
+if "ui_theme" not in st.session_state:
+    st.session_state["ui_theme"] = detect_theme_base()
+is_dark_theme = st.session_state["ui_theme"] == "dark"
+hint_color = "#9ca3af" if is_dark_theme else "#6b7280"
+
 # 注入 Google Fonts + 自定義 CSS
-st.markdown("""
+st.markdown(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
-html, body, [class*="css"] {
+html, body, [class*="css"] {{
     font-family: 'Noto Sans TC', 'Microsoft JhengHei', sans-serif !important;
-}
-h1 { letter-spacing: -0.02em; }
-.block-container { padding-top: 2rem; padding-bottom: 3rem; }
-[data-testid="stMetricValue"] { font-size: 1.35rem; }
-.section-hint { color: #9ca3af; font-size: 0.92rem; margin-top: -0.4rem; }
+}}
+h1 {{ letter-spacing: -0.02em; }}
+.block-container {{ padding-top: 2rem; padding-bottom: 3rem; }}
+[data-testid="stMetricValue"] {{ font-size: 1.35rem; }}
+.section-hint {{ color: {hint_color}; font-size: 0.92rem; margin-top: -0.4rem; }}
 </style>
 """, unsafe_allow_html=True)
+
+# 同一個 session 內曾切換主題時，注入即時覆蓋樣式（詳見 build_theme_override_css 說明）
+if st.session_state.get("theme_live_override"):
+    st.markdown(build_theme_override_css(st.session_state["ui_theme"]), unsafe_allow_html=True)
 
 # 初始化 Session State
 if "is_analyzing" not in st.session_state:
@@ -121,8 +231,17 @@ if "access_granted" not in st.session_state:
 server_api_key = get_secret_value("GEMINI_API_KEY")
 app_password = get_secret_value("APP_PASSWORD")
 
-st.title("🎰 Casino Game AI 競品分析儀")
-st.caption("🏷️ 版本：v1.3.0 (全面體驗升級)")
+title_col, theme_col = st.columns([5, 1], vertical_alignment="center")
+with title_col:
+    st.title("🎰 Casino Game AI 競品分析儀")
+with theme_col:
+    st.button(
+        "☀️ 淺色模式" if is_dark_theme else "🌙 深色模式",
+        on_click=toggle_theme,
+        width="stretch",
+        help="切換整個介面的深色 / 淺色主題。",
+    )
+st.caption("🏷️ 版本：v1.4.0 (深淺色切換與體驗優化)")
 st.markdown("快速比較自家產品與市面競品的遊玩體驗差異，並產生具有體感的結構化改善報告。")
 
 if app_password and not st.session_state["access_granted"]:
@@ -148,6 +267,22 @@ with st.sidebar:
         st.markdown("[🔑 點此前往 Google AI Studio 取得 API Key](https://aistudio.google.com/app/apikey)")
         st.info("目前使用個人 API Key 模式：每位使用者輸入自己的 Key，費用與額度會算在各自的 Google AI 帳號。")
 
+    model_choice = st.selectbox(
+        "Gemini 模型",
+        [
+            "gemini-3.5-flash",
+            "gemini-3-flash-preview",
+            "gemini-3.1-pro-preview",
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+        ],
+        help=(
+            "建議使用 gemini-3.5-flash（最新正式版，分析力接近 Pro）。"
+            "gemini-3-flash-preview 較便宜；gemini-3.1-pro-preview 分析最精準但無免費額度，需付費帳號；"
+            "gemini-2.5-flash 為最省錢的舊版選項。"
+        )
+    )
+
     st.markdown("---")
     with st.expander("📋 使用步驟（點我展開）", expanded=True):
         st.markdown("""
@@ -165,17 +300,6 @@ with st.sidebar:
         st.error("⚠️ **非常重要 (個人 API Key 模式)**：\n分析影片會消耗大量 Token，費用與額度會算在輸入的 API Key 所屬帳號。通常需要綁定付費資訊 (Pay as you go) 才能穩定執行。")
         st.markdown("分析完畢後，雲端影片檔案將會被自動刪除，保護機密並確保不會浪費資源。")
 
-    st.markdown("---")
-    # 模型選擇
-    model_choice = st.selectbox(
-        "Gemini 模型",
-        [
-            "gemini-2.5-flash",
-            "gemini-2.5-pro",
-            "gemini-2.5-pro-preview-05-06",
-        ],
-        help="建議使用 gemini-2.5-flash（速度快、費用低）或 gemini-2.5-pro（分析更精準）。"
-    )
 st.markdown("---")
 
 # ================================
@@ -360,13 +484,22 @@ with summary_col:
         else:
             st.info("請先上傳自家與競品影片。")
 
+        missing_items = []
+        if not api_key_input:
+            missing_items.append("Gemini API Key")
+        if not home_video or not comp_video:
+            missing_items.append("自家與競品影片")
         st.button(
             "🚀 開始深度分析",
             on_click=trigger_analysis,
-            disabled=st.session_state.get("is_analyzing", False),
-            use_container_width=True,
+            disabled=st.session_state.get("is_analyzing", False) or bool(missing_items),
+            width="stretch",
             type="primary",
         )
+        if missing_items:
+            st.caption("⛔ 尚未就緒：請先補齊 " + "、".join(missing_items) + "。")
+        elif st.session_state.get("is_analyzing", False):
+            st.caption("⏳ 分析進行中，請稍候…")
 
 # ================================
 # 3. 核心處理函式
@@ -602,11 +735,17 @@ if st.session_state.get("is_analyzing", False):
 
         # 前端 JS 實作的無縫讀取條（用字串拼接插入動態秒數，避免 f-string 與 JS {} 衝突）
         _js_total = str(estimated_seconds)
+        if is_dark_theme:
+            _bar_track, _bar_border, _bar_fill = "#262730", "#444", "#FFC107"
+            _bar_text, _bar_shadow = "#FAFAFA", "1px 1px 2px rgba(0,0,0,0.8)"
+        else:
+            _bar_track, _bar_border, _bar_fill = "#F0F2F6", "#D1D5DB", "#D97706"
+            _bar_text, _bar_shadow = "#31333F", "none"
         _progress_html = (
             '<!DOCTYPE html><html><body style="margin: 0; padding: 0; font-family: sans-serif; overflow: hidden; background-color: transparent;">'
-            '<div style="width: 100%; height: 35px; background-color: #262730; border-radius: 6px; position: relative; border: 1px solid #444;">'
-            '<div id="ai-progress-bar" style="width: 0%; height: 100%; background-color: #FFC107; border-radius: 6px; transition: width 1s linear;"></div>'
-            '<div id="ai-progress-text" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #FAFAFA; text-shadow: 1px 1px 2px rgba(0,0,0,0.8);">👻 正在準備解析影片...</div>'
+            f'<div style="width: 100%; height: 35px; background-color: {_bar_track}; border-radius: 6px; position: relative; border: 1px solid {_bar_border};">'
+            f'<div id="ai-progress-bar" style="width: 0%; height: 100%; background-color: {_bar_fill}; border-radius: 6px; transition: width 1s linear;"></div>'
+            f'<div id="ai-progress-text" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: {_bar_text}; text-shadow: {_bar_shadow};">👻 正在準備解析影片...</div>'
             '</div>'
             '<script>'
             'let pb = document.getElementById("ai-progress-bar");'
@@ -766,6 +905,9 @@ if st.session_state.get("is_analyzing", False):
 if st.session_state.get("analysis_history"):
     st.markdown("---")
     history = st.session_state["analysis_history"]
+    # 剛完成新分析時，自動跳到最新一筆報告，避免畫面停留在先前選取的舊報告
+    if st.session_state.pop("just_analyzed", False):
+        st.session_state["selected_history_idx"] = len(history) - 1
     if "selected_history_idx" not in st.session_state:
         st.session_state["selected_history_idx"] = len(history) - 1
     st.session_state["selected_history_idx"] = min(st.session_state["selected_history_idx"], len(history) - 1)
@@ -829,7 +971,7 @@ if st.session_state.get("analysis_history"):
             st.info("此報告沒有可解析的 JSON 評分，因此暫時無法顯示雷達圖與分數摘要。")
 
         if fig:
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
         with st.expander("查看完整 AI 報告內容", expanded=False):
             st.markdown(clean_report)
@@ -851,7 +993,7 @@ if st.session_state.get("analysis_history"):
                 file_name=f"{safe_project or '競品分析報告'}_{safe_time}.html",
                 mime="text/html",
                 type="primary",
-                use_container_width=True
+                width="stretch"
             )
         with col2:
             st.download_button(
@@ -859,7 +1001,7 @@ if st.session_state.get("analysis_history"):
                 data=current_report["report_md"],
                 file_name=f"{safe_project or '競品分析報告'}_{safe_time}.md",
                 mime="text/markdown",
-                use_container_width=True
+                width="stretch"
             )
         col3, col4 = st.columns(2)
         with col3:
@@ -868,7 +1010,7 @@ if st.session_state.get("analysis_history"):
                 data=report_html.encode("utf-8"),
                 file_name=f"{safe_project or '競品分析報告'}_{safe_time}.doc",
                 mime="application/msword",
-                use_container_width=True
+                width="stretch"
             )
         with col4:
             st.download_button(
@@ -876,7 +1018,7 @@ if st.session_state.get("analysis_history"):
                 data=task_cards_text,
                 file_name=f"{safe_project or '競品分析任務卡'}_{safe_time}.txt",
                 mime="text/plain",
-                use_container_width=True
+                width="stretch"
             )
 
     with history_tab:
@@ -905,11 +1047,11 @@ if st.session_state.get("analysis_history"):
                 data=history_json,
                 file_name=f"analysis_history_backup_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
                 mime="application/json",
-                use_container_width=True
+                width="stretch"
             )
         with hcol2:
             confirm_clear = st.checkbox("我確認要清空本機歷史紀錄", key="confirm_clear_history")
-            if st.button("🗑️ 清空本機歷史", disabled=not confirm_clear, use_container_width=True):
+            if st.button("🗑️ 清空本機歷史", disabled=not confirm_clear, width="stretch"):
                 st.session_state["analysis_history"] = []
                 save_analysis_history([])
                 st.success("本機歷史紀錄已清空。")
