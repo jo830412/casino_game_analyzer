@@ -207,6 +207,14 @@ h1 {{ letter-spacing: -0.02em; }}
 .block-container {{ padding-top: 2rem; padding-bottom: 3rem; }}
 [data-testid="stMetricValue"] {{ font-size: 1.35rem; }}
 .section-hint {{ color: {hint_color}; font-size: 0.92rem; margin-top: -0.4rem; }}
+/* 寬螢幕時讓右側「本次分析」面板黏在畫面上，捲動時開始分析按鈕不會消失 */
+@media (min-width: 992px) {{
+    [data-testid="stColumn"]:has(.st-key-summary_panel) {{
+        position: sticky;
+        top: 4.2rem;
+        align-self: flex-start;
+    }}
+}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -241,7 +249,7 @@ with theme_col:
         width="stretch",
         help="切換整個介面的深色 / 淺色主題。",
     )
-st.caption("🏷️ 版本：v1.4.0 (深淺色切換與體驗優化)")
+st.caption("🏷️ 版本：v1.4.1 (介面與體驗優化)")
 st.markdown("快速比較自家產品與市面競品的遊玩體驗差異，並產生具有體感的結構化改善報告。")
 
 if app_password and not st.session_state["access_granted"]:
@@ -284,7 +292,7 @@ with st.sidebar:
     )
 
     st.markdown("---")
-    with st.expander("📋 使用步驟（點我展開）", expanded=True):
+    with st.expander("📋 使用步驟（點我展開）", expanded=False):
         st.markdown("""
 1. 🔑 輸入自己的 Gemini API Key
 2. 🎮 選擇遊戲類型
@@ -348,6 +356,7 @@ with workspace_col:
                 st.video(comp_video)
 
     st.subheader("3. 分析設定")
+    st.markdown('<p class="section-hint">全部為選填。想要更聚焦的報告時，再展開設定分析模式、觀察重點與時間區間。</p>', unsafe_allow_html=True)
     with st.expander("進階分析設定", expanded=False):
         analysis_modes = st.multiselect(
             "本次分析模式",
@@ -457,12 +466,13 @@ with workspace_col:
 
 with summary_col:
     st.subheader("本次分析")
-    with st.container(border=True):
+    with st.container(border=True, key="summary_panel"):
         selected_modes_preview = analysis_modes if "analysis_modes" in locals() else ["爽感與節奏", "UI/UX 操作", "美術特效"]
         st.caption("分析摘要")
         st.write(f"**專案**：{project_name.strip() or '未命名'}")
         st.write(f"**遊戲類型**：{game_type}")
         st.write(f"**分析模式**：{', '.join(selected_modes_preview)}")
+        st.write(f"**模型**：{model_choice}")
 
         if home_video and comp_video:
             home_size_mb = home_video.size / (1024 * 1024)
@@ -927,7 +937,7 @@ if st.session_state.get("analysis_history"):
     task_cards_text = extract_task_cards(current_report.get("report_md", ""))
 
     overview_tab, tasks_tab, report_tab, export_tab, history_tab = st.tabs(
-        ["總覽", "任務卡", "完整報告", "下載", "歷史"]
+        ["📊 總覽", "📝 任務卡", "📄 完整報告", "💾 下載", "🗂️ 歷史"]
     )
 
     with overview_tab:
@@ -1058,3 +1068,8 @@ if st.session_state.get("analysis_history"):
                 st.rerun()
 
     st.caption(f"💡 小提示：歷史報告會保存在本機 `{HISTORY_FILE}`，重新開啟工具後仍可回看最近 {MAX_HISTORY_ITEMS} 筆。")
+elif not st.session_state.get("is_analyzing", False):
+    st.markdown("---")
+    with st.container(border=True):
+        st.markdown("#### 📄 分析報告會顯示在這裡")
+        st.markdown("上傳自家與競品影片、點擊「🚀 開始深度分析」後，完整報告、雷達圖、任務卡與下載選項都會出現在此區。")
