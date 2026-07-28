@@ -11,6 +11,14 @@ import html as html_lib
 import markdown as md_lib
 from datetime import datetime
 
+from app_state import (
+    apply_options_transactionally,
+    persist_analysis_record,
+    switch_theme,
+)
+from model_catalog import MODEL_IDS, model_display_name
+from progress_ui import build_estimated_progress_html
+
 APP_DIR = pathlib.Path(__file__).resolve().parent
 DATA_DIR = APP_DIR / "data"
 HISTORY_FILE = DATA_DIR / "analysis_history.json"
@@ -120,15 +128,15 @@ def detect_theme_base():
 
 
 def apply_theme(theme_name):
-    for option, value in THEME_PRESETS[theme_name].items():
-        st._config.set_option(option, value)
+    apply_options_transactionally(
+        THEME_PRESETS[theme_name],
+        st._config.get_option,
+        st._config.set_option,
+    )
 
 
 def toggle_theme():
-    new_theme = "light" if st.session_state.get("ui_theme") == "dark" else "dark"
-    st.session_state["ui_theme"] = new_theme
-    st.session_state["theme_live_override"] = True
-    apply_theme(new_theme)
+    switch_theme(st.session_state, apply_theme)
 
 
 def build_theme_override_css(theme_name):
@@ -249,6 +257,11 @@ with theme_col:
         width="stretch",
         help="切換整個介面的深色 / 淺色主題。",
     )
+if st.session_state.get("theme_native_sync_error"):
+    st.warning(
+        "原生主題設定暫時無法同步，目前已改用頁面樣式完成切換；"
+        "重新整理後可能回到伺服器的預設主題。"
+    )
 st.caption("🏷️ 版本：v1.4.1 (介面與體驗優化)")
 st.markdown("快速比較自家產品與市面競品的遊玩體驗差異，並產生具有體感的結構化改善報告。")
 
@@ -277,17 +290,11 @@ with st.sidebar:
 
     model_choice = st.selectbox(
         "Gemini 模型",
-        [
-            "gemini-3.5-flash",
-            "gemini-3-flash-preview",
-            "gemini-3.1-pro-preview",
-            "gemini-2.5-flash",
-            "gemini-2.5-pro",
-        ],
+        MODEL_IDS,
+        format_func=model_display_name,
         help=(
-            "建議使用 gemini-3.5-flash（最新正式版，分析力接近 Pro）。"
-            "gemini-3-flash-preview 較便宜；gemini-3.1-pro-preview 分析最精準但無免費額度，需付費帳號；"
-            "gemini-2.5-flash 為最省錢的舊版選項。"
+            "建議使用 Gemini 3.5 Flash（適合影片分析與結構化報告）。"
+            "Preview 模型可能變動；Pro 模型偏重品質，但通常需要付費額度。"
         )
     )
 
@@ -472,7 +479,7 @@ with summary_col:
         st.write(f"**專案**：{project_name.strip() or '未命名'}")
         st.write(f"**遊戲類型**：{game_type}")
         st.write(f"**分析模式**：{', '.join(selected_modes_preview)}")
-        st.write(f"**模型**：{model_choice}")
+        st.write(f"**模型**：{model_display_name(model_choice)}")
 
         if home_video and comp_video:
             home_size_mb = home_video.size / (1024 * 1024)
@@ -743,39 +750,8 @@ if st.session_state.get("is_analyzing", False):
         total_size_mb = (home_video.size + comp_video.size) / (1024 * 1024)
         estimated_seconds = estimate_analysis_seconds(total_size_mb)
 
-        # 前端 JS 實作的無縫讀取條（用字串拼接插入動態秒數，避免 f-string 與 JS {} 衝突）
-        _js_total = str(estimated_seconds)
-        if is_dark_theme:
-            _bar_track, _bar_border, _bar_fill = "#262730", "#444", "#FFC107"
-            _bar_text, _bar_shadow = "#FAFAFA", "1px 1px 2px rgba(0,0,0,0.8)"
-        else:
-            _bar_track, _bar_border, _bar_fill = "#F0F2F6", "#D1D5DB", "#D97706"
-            _bar_text, _bar_shadow = "#31333F", "none"
-        _progress_html = (
-            '<!DOCTYPE html><html><body style="margin: 0; padding: 0; font-family: sans-serif; overflow: hidden; background-color: transparent;">'
-            f'<div style="width: 100%; height: 35px; background-color: {_bar_track}; border-radius: 6px; position: relative; border: 1px solid {_bar_border};">'
-            f'<div id="ai-progress-bar" style="width: 0%; height: 100%; background-color: {_bar_fill}; border-radius: 6px; transition: width 1s linear;"></div>'
-            f'<div id="ai-progress-text" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: {_bar_text}; text-shadow: {_bar_shadow};">👻 正在準備解析影片...</div>'
-            '</div>'
-            '<script>'
-            'let pb = document.getElementById("ai-progress-bar");'
-            'let pt = document.getElementById("ai-progress-text");'
-            'let t = 0; let total = ' + _js_total + ';'
-            'let iv = setInterval(() => {'
-            '  t++;'
-            '  let pct = Math.min((t/total)*95, 95);'
-            '  if(pb) pb.style.width = pct + "%";'
-            '  if(pt) {'
-            '    if (t < 10) pt.innerText = "👀 正在以 10 倍速解析影片中... (" + Math.floor(pct) + "%)";'
-            '    else if (t < 25) pt.innerText = "🧠 正在對比兩款遊戲的節奏與特效差異... (" + Math.floor(pct) + "%)";'
-            '    else if (t < 40) pt.innerText = "📝 正在整理結構化總結與最佳化建議... (" + Math.floor(pct) + "%)";'
-            '    else pt.innerText = "✨ 報告即將出爐，請稍候... (" + Math.floor(pct) + "%)";'
-            '  }'
-            '  if (t >= total) clearInterval(iv);'
-            '}, 1000);'
-            '</script>'
-            '</body></html>'
-        )
+        st.caption("⏱️ 以下為預估階段，實際時間依 Gemini 處理速度與影片長度而異。")
+        _progress_html = build_estimated_progress_html(estimated_seconds, is_dark_theme)
         progress_placeholder = st.empty()
         with progress_placeholder:
             components.html(_progress_html, height=40)
@@ -854,19 +830,22 @@ if st.session_state.get("is_analyzing", False):
 </body>
 </html>"""
 
+        analysis_record = {
+            **report_meta,
+            "report_md": full_response_text,
+            "styled_html": styled_html,
+        }
+        # 先完成持久化，再提交 session 成功狀態，避免寫檔失敗卻顯示為成功。
+        persist_analysis_record(
+            st.session_state,
+            analysis_record,
+            save_analysis_history,
+            MAX_HISTORY_ITEMS,
+        )
         # 存入 session_state 避免畫面重整消失
         st.session_state["report_md"] = full_response_text
         st.session_state["styled_html"] = styled_html
         st.session_state["analysis_done"] = True
-        st.session_state["just_analyzed"] = True
-        # 加入歷史記錄
-        st.session_state["analysis_history"].append({
-            **report_meta,
-            "report_md": full_response_text,
-            "styled_html": styled_html,
-        })
-        st.session_state["analysis_history"] = st.session_state["analysis_history"][-MAX_HISTORY_ITEMS:]
-        save_analysis_history(st.session_state["analysis_history"])
 
     except Exception as e:
         error_msg = str(e)
@@ -923,12 +902,15 @@ if st.session_state.get("analysis_history"):
     st.session_state["selected_history_idx"] = min(st.session_state["selected_history_idx"], len(history) - 1)
     current_report = history[st.session_state["selected_history_idx"]]
 
-    st.markdown("## 📊 競品體驗分析報告")
+    st.markdown("## 📊 目前顯示的分析報告")
+    st.caption(f"🗂️ 歷史紀錄 · 分析時間：{current_report.get('time') or '未記錄'}")
     meta_cols = st.columns(4)
     meta_cols[0].caption(f"專案：{current_report.get('project_name', '未命名專案')}")
     meta_cols[1].caption(f"分析人員：{current_report.get('analyst_name', '未填寫')}")
     meta_cols[2].caption(f"模式：{', '.join(current_report.get('analysis_modes', [])) or '未記錄'}")
-    meta_cols[3].caption(f"模型：{current_report.get('model', '未記錄')}")
+    meta_cols[3].caption(
+        f"模型：{model_display_name(current_report.get('model') or '未記錄')}"
+    )
 
     fig, clean_report, scores = render_radar_chart(current_report["report_md"])
     safe_project = re.sub(r'[\\/:*?"<>|\s]+', '_', current_report.get('project_name', '競品分析')).strip('_')
@@ -1041,7 +1023,6 @@ if st.session_state.get("analysis_history"):
             st.selectbox(
                 f"歷史報告記錄（共 {len(history)} 筆，可切換查看）",
                 range(len(history_labels)),
-                index=st.session_state["selected_history_idx"],
                 format_func=lambda i: history_labels[i],
                 key="selected_history_idx",
             )
